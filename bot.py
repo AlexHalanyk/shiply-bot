@@ -9,7 +9,7 @@ token = os.getenv("TELEGRAM_TOKEN")
 chat_id = os.getenv("CHAT_ID")
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-db = sqlite3.connect("sent_jobs.db")
+db = sqlite3.connect("data/sent_jobs.db")
 db_cursor = db.cursor()
 
 db_cursor.execute("""
