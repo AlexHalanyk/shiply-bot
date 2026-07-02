@@ -6,7 +6,6 @@ import sqlite3
 
 load_dotenv()
 token = os.getenv("TELEGRAM_TOKEN")
-chat_id = os.getenv("CHAT_ID")
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 db = sqlite3.connect("data/sent_jobs.db")
@@ -18,11 +17,21 @@ db_cursor.execute("""
     )
 """)
 
+db_cursor.execute("""
+    CREATE TABLE IF NOT EXISTS subscribers (
+        chat_id INTEGER PRIMARY KEY
+    )
+""")
+
+
 def send_notification(job):
     text = f"🚚  New Order\n{job['route']}\nPrice: £{job['price']}"
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = {"chat_id": chat_id, "text": text}
-    requests.post(url, data=data)
+
+    subscribers = get_subscribers()
+    for subscriber_id in subscribers:
+        data = {"chat_id": subscriber_id, "text": text}
+        requests.post(url, data=data)
 
 def is_relevant_ai(job):
     prompt = f"""You are helping a UK transport driver decide if a delivery job is worth taking.
@@ -54,3 +63,31 @@ def already_sent(link):
 def mark_as_sent(link):
     db_cursor.execute("INSERT OR IGNORE INTO sent_jobs (link) VALUES (?)", (link,))
     db.commit()
+
+def add_subscriber(chat_id):
+    db_cursor.execute("INSERT OR IGNORE INTO subscribers (chat_id) VALUES (?)", (chat_id,))
+    db.commit()
+
+
+def get_subscribers():
+    db_cursor.execute("SELECT chat_id FROM subscribers")
+    rows = db_cursor.fetchall()
+    return [row[0] for row in rows]
+
+def check_new_subscribers():
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    response = requests.get(url)
+    data = response.json()
+
+    last_update_id = 0
+    for update in data["result"]:
+        message = update.get("message", {})
+        chat = message.get("chat", {})
+        new_chat_id = chat.get("id")
+        if new_chat_id is not None:
+            add_subscriber(new_chat_id)
+            print("New subscriber:", new_chat_id)
+        last_update_id = update["update_id"]
+
+    if last_update_id != 0:
+        requests.get(url, params={"offset": last_update_id + 1})

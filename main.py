@@ -1,4 +1,4 @@
-from bot import send_notification, is_relevant_ai, already_sent, mark_as_sent
+from bot import send_notification, is_relevant_ai, already_sent, mark_as_sent, check_new_subscribers
 import time
 
 
@@ -32,6 +32,8 @@ def check_jobs():
 
 
 while True:
+    print("Checking subscribers...")
+    check_new_subscribers()
     print("Checking jobs...")
     check_jobs()
     print("Sleeping for 15 minutes...")
