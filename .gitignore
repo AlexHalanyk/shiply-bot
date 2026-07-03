@@ -4,3 +4,4 @@ __pycache__/
 sent_jobs.db
 .git/
 data/
+CLAUDE.md

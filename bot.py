@@ -25,7 +25,7 @@ db_cursor.execute("""
 
 
 def send_notification(job):
-    text = f"🚚  New Order\n{job['route']}\nPrice: £{job['price']}"
+    text = f"💼  New Job\n{job['title']} at {job['company']}\n{job['location']}\n{job['link']}"
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
     subscribers = get_subscribers()
@@ -34,19 +34,15 @@ def send_notification(job):
         requests.post(url, data=data)
 
 def is_relevant_ai(job):
-    prompt = f"""You are helping a UK transport driver decide if a delivery job is worth taking.
-
-The driver's criteria for a good job:
-- Price of £200 or more is acceptable
-- Longer intercity routes are fine if the price matches
-- Any standard cargo (furniture, boxes, appliances) is fine
+    prompt = f"""You are helping a UK computer science graduate find a suitable first software engineering job.
 
 Job details:
-Route: {job['route']}
-Cargo: {job['cargo']}
-Price: £{job['price']}
+Title: {job['title']}
+Company: {job['company']}
+Location: {job['location']}
 
-Based on the criteria above, answer with only one word: YES if the job is worth taking, NO if it is not."""
+Is this a graduate or junior software engineering role in the UK suitable for a CS graduate?
+Answer with only one word: YES or NO."""
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
