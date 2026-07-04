@@ -35,6 +35,32 @@ def check_jobs():
             print("Skip (cheap filter):", job["title"])
             continue
 
+        if LLM_BACKEND == "cascade":
+            # Gemma is free/local, so it takes the first (bulk-rejecting)
+            # pass; only jobs it approves cost a Gemini call.
+            gemma_decision = is_relevant_ai_ollama(job)
+            if gemma_decision is None:
+                print("Skip (AI error, will retry):", job["title"])
+                continue
+
+            if not gemma_decision:
+                mark_as_sent(job["link"])
+                print("Skip (AI rejected (gemma)):", job["title"])
+                continue
+
+            gemini_decision = is_relevant_ai(job)
+            if gemini_decision is None:
+                print("Skip (AI error, will retry):", job["title"])
+                continue
+
+            mark_as_sent(job["link"])
+            if gemini_decision:
+                send_notification(job)
+                print("Sent (cascade approved):", job["title"])
+            else:
+                print("Skip (AI rejected (gemini after gemma pass)):", job["title"])
+            continue
+
         ai_decision = check_relevance(job)
         if ai_decision is None:
             # Don't mark_as_sent here: the LLM call failed (e.g. rate limit),
