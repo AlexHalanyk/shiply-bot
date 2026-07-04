@@ -1,9 +1,8 @@
-from bot import send_notification, is_relevant_ai, already_sent, mark_as_sent, check_new_subscribers
+from bot import send_notification, is_relevant_ai, already_sent, mark_as_sent, check_incoming_messages, get_companies
 from sources import fetch_greenhouse_jobs
 import time
 
 KEYWORDS = ["graduate", "junior", "intern", "engineer", "software"]
-BOARD_SLUGS = ["skyscanner", "monzo"]
 
 
 def is_relevant(job):
@@ -13,7 +12,7 @@ def is_relevant(job):
 
 def check_jobs():
     jobs = []
-    for slug in BOARD_SLUGS:
+    for slug in get_companies():
         jobs += fetch_greenhouse_jobs(slug)
 
     for job in jobs:
@@ -36,8 +35,8 @@ def check_jobs():
 
 if __name__ == "__main__":
     while True:
-        print("Checking subscribers...")
-        check_new_subscribers()
+        print("Checking messages...")
+        check_incoming_messages()
         print("Checking jobs...")
         check_jobs()
         print("Sleeping for 15 minutes...")
