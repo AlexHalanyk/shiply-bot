@@ -10,6 +10,10 @@ load_dotenv()
 token = os.getenv("TELEGRAM_TOKEN")
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
+LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
+OLLAMA_URL = os.getenv("OLLAMA_URL")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:12b")
+
 db = sqlite3.connect("data/sent_jobs.db")
 db_cursor = db.cursor()
 
@@ -61,8 +65,8 @@ def send_notification(job):
     for subscriber_id in get_subscribers():
         send_message(subscriber_id, text)
 
-def is_relevant_ai(job):
-    prompt = f"""You are helping a UK computer science graduate find a suitable first software engineering job.
+def _build_relevance_prompt(job):
+    return f"""You are helping a UK computer science graduate find a suitable first software engineering job.
 
 Job details:
 Title: {job['title']}
@@ -71,6 +75,10 @@ Location: {job['location']}
 
 Is this a graduate or junior software engineering role in the UK suitable for a CS graduate?
 Answer with only one word: YES or NO."""
+
+
+def is_relevant_ai(job):
+    prompt = _build_relevance_prompt(job)
 
     try:
         response = client.models.generate_content(
@@ -90,6 +98,25 @@ Answer with only one word: YES or NO."""
     # The model doesn't always answer with a bare "YES"/"NO" (e.g. "Yes.",
     # a full sentence), so normalise and check for containment, not equality.
     decision = response.text.strip().upper()
+    return "YES" in decision
+
+
+def is_relevant_ai_ollama(job):
+    prompt = _build_relevance_prompt(job)
+
+    try:
+        response = requests.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=120,  # CPU inference is slow
+        )
+        decision = response.json()["response"].strip().upper()
+    except Exception as e:
+        # Same contract as is_relevant_ai: None means "couldn't get a
+        # decision", so the caller retries the job next cycle.
+        print("Ollama API error:", e)
+        return None
+
     return "YES" in decision
 
 def already_sent(link):

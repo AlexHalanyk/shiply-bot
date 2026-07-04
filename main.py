@@ -1,4 +1,13 @@
-from bot import send_notification, is_relevant_ai, already_sent, mark_as_sent, check_incoming_messages, get_companies
+from bot import (
+    send_notification,
+    is_relevant_ai,
+    is_relevant_ai_ollama,
+    already_sent,
+    mark_as_sent,
+    check_incoming_messages,
+    get_companies,
+    LLM_BACKEND,
+)
 from sources import fetch_greenhouse_jobs
 import time
 
@@ -11,6 +20,8 @@ def is_relevant(job):
 
 
 def check_jobs():
+    check_relevance = is_relevant_ai_ollama if LLM_BACKEND == "ollama" else is_relevant_ai
+
     jobs = []
     for slug in get_companies():
         jobs += fetch_greenhouse_jobs(slug)
@@ -24,7 +35,7 @@ def check_jobs():
             print("Skip (cheap filter):", job["title"])
             continue
 
-        ai_decision = is_relevant_ai(job)
+        ai_decision = check_relevance(job)
         if ai_decision is None:
             # Don't mark_as_sent here: the LLM call failed (e.g. rate limit),
             # not the job — retry it next cycle once quota recovers.
