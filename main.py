@@ -14,6 +14,9 @@ import time
 KEYWORDS = ["graduate", "junior", "intern", "engineer", "software"]
 START_TIME = time.time()
 
+MESSAGE_POLL_INTERVAL = 10  # seconds between checks for incoming Telegram messages
+JOBS_CHECK_INTERVAL = 900  # seconds between job-board checks (15 minutes)
+
 
 def is_relevant(job):
     title = job["title"].lower()
@@ -83,11 +86,28 @@ def check_jobs():
             print("Skip (AI rejected):", job["title"])
 
 
-if __name__ == "__main__":
-    while True:
-        print("Checking messages...")
-        check_incoming_messages(START_TIME)
-        print("Checking jobs...")
+def due_for_jobs_check(last_jobs_run, now):
+    """True once JOBS_CHECK_INTERVAL seconds have passed since last_jobs_run."""
+    return (now - last_jobs_run) >= JOBS_CHECK_INTERVAL
+
+
+def run_loop_iteration(last_jobs_run, now=None):
+    """Runs one pass of the loop: always checks messages, only checks jobs
+    if the interval has elapsed. Returns the (possibly updated) last_jobs_run."""
+    if now is None:
+        now = time.time()
+
+    check_incoming_messages(START_TIME)
+
+    if due_for_jobs_check(last_jobs_run, now):
         check_jobs()
-        print("Sleeping for 15 minutes...")
-        time.sleep(900)
+        return now
+
+    return last_jobs_run
+
+
+if __name__ == "__main__":
+    last_jobs_run = 0
+    while True:
+        last_jobs_run = run_loop_iteration(last_jobs_run)
+        time.sleep(MESSAGE_POLL_INTERVAL)
