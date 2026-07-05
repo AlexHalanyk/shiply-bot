@@ -1,3 +1,4 @@
+import datetime
 import os
 import re
 import time
@@ -23,6 +24,21 @@ db_cursor.execute("""
         link TEXT PRIMARY KEY
     )
 """)
+
+
+def _migrate_sent_jobs_schema(cursor, conn):
+    # Additive-only migration: existing rows keep decision/processed_at as
+    # NULL rather than losing data via a drop-and-recreate.
+    cursor.execute("PRAGMA table_info(sent_jobs)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    if "decision" not in existing_columns:
+        cursor.execute("ALTER TABLE sent_jobs ADD COLUMN decision TEXT")
+    if "processed_at" not in existing_columns:
+        cursor.execute("ALTER TABLE sent_jobs ADD COLUMN processed_at TEXT")
+    conn.commit()
+
+
+_migrate_sent_jobs_schema(db_cursor, db)
 
 db_cursor.execute("""
     CREATE TABLE IF NOT EXISTS subscribers (
@@ -134,8 +150,11 @@ def already_sent(link):
     return db_cursor.fetchone() is not None
 
 
-def mark_as_sent(link):
-    db_cursor.execute("INSERT OR IGNORE INTO sent_jobs (link) VALUES (?)", (link,))
+def mark_as_sent(link, decision):
+    db_cursor.execute(
+        "INSERT OR IGNORE INTO sent_jobs (link, decision, processed_at) VALUES (?, ?, ?)",
+        (link, decision, datetime.datetime.now(datetime.timezone.utc).isoformat()),
+    )
     db.commit()
 
 def add_subscriber(chat_id):
@@ -168,7 +187,39 @@ def is_valid_greenhouse_board(slug):
     return response.status_code == 200
 
 
-def check_incoming_messages():
+def _format_uptime(seconds):
+    seconds = max(0, int(seconds))
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if days:
+        return f"{days}d {hours}h {minutes}m"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m {secs}s"
+
+
+def build_stats_reply(start_time):
+    db_cursor.execute("SELECT COUNT(*) FROM sent_jobs")
+    total = db_cursor.fetchone()[0]
+
+    db_cursor.execute("SELECT decision, COUNT(*) FROM sent_jobs GROUP BY decision")
+    breakdown = db_cursor.fetchall()
+
+    lines = ["📊 Stats", f"Total jobs processed: {total}"]
+    for decision, count in breakdown:
+        label = decision or "unrecorded (pre-stats)"
+        pct = (count / total * 100) if total else 0
+        lines.append(f"  {label}: {count} ({pct:.1f}%)")
+
+    lines.append(f"Tracked companies: {len(get_companies())}")
+    lines.append(f"Subscribers: {len(get_subscribers())}")
+    lines.append(f"Uptime: {_format_uptime(time.time() - start_time)}")
+
+    return "\n".join(lines)
+
+
+def check_incoming_messages(start_time):
     url = f"https://api.telegram.org/bot{token}/getUpdates"
     response = requests.get(url)
     data = response.json()
@@ -184,6 +235,9 @@ def check_incoming_messages():
             if text == "/start":
                 add_subscriber(chat_id)
                 print("New subscriber:", chat_id)
+            elif text == "/stats":
+                # Reply directly to the requester only — never a broadcast.
+                send_message(chat_id, build_stats_reply(start_time))
             else:
                 slug = extract_greenhouse_slug(text)
                 if slug is not None:

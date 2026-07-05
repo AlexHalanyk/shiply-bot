@@ -24,7 +24,7 @@ def job():
     }
 
 
-def test_gemma_false_rejects_without_calling_gemini(monkeypatch, cascade_env, job):
+def test_gemma_false_rejects_without_calling_gemini(monkeypatch, cascade_env, job, get_decision):
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
 
     gemini_calls = []
@@ -36,9 +36,10 @@ def test_gemma_false_rejects_without_calling_gemini(monkeypatch, cascade_env, jo
     assert gemini_calls == []
     assert cascade_env == []
     assert bot.already_sent(job["link"]) is True
+    assert get_decision(job["link"]) == "gemma_rejected"
 
 
-def test_gemma_true_gemini_true_sends_notification(monkeypatch, cascade_env, job):
+def test_gemma_true_gemini_true_sends_notification(monkeypatch, cascade_env, job, get_decision):
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
     monkeypatch.setattr(main, "is_relevant_ai_ollama", lambda j: True)
     monkeypatch.setattr(main, "is_relevant_ai", lambda j: True)
@@ -47,9 +48,10 @@ def test_gemma_true_gemini_true_sends_notification(monkeypatch, cascade_env, job
 
     assert cascade_env == [job["title"]]
     assert bot.already_sent(job["link"]) is True
+    assert get_decision(job["link"]) == "sent"
 
 
-def test_gemma_true_gemini_false_does_not_send(monkeypatch, cascade_env, job):
+def test_gemma_true_gemini_false_does_not_send(monkeypatch, cascade_env, job, get_decision):
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
     monkeypatch.setattr(main, "is_relevant_ai_ollama", lambda j: True)
     monkeypatch.setattr(main, "is_relevant_ai", lambda j: False)
@@ -58,9 +60,10 @@ def test_gemma_true_gemini_false_does_not_send(monkeypatch, cascade_env, job):
 
     assert cascade_env == []
     assert bot.already_sent(job["link"]) is True
+    assert get_decision(job["link"]) == "gemini_rejected"
 
 
-def test_gemma_none_skips_without_marking(monkeypatch, cascade_env, job):
+def test_gemma_none_skips_without_marking(monkeypatch, cascade_env, job, get_decision):
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
 
     gemini_calls = []
@@ -72,9 +75,10 @@ def test_gemma_none_skips_without_marking(monkeypatch, cascade_env, job):
     assert gemini_calls == []
     assert cascade_env == []
     assert bot.already_sent(job["link"]) is False
+    assert get_decision(job["link"]) is None
 
 
-def test_gemini_none_skips_without_marking(monkeypatch, cascade_env, job):
+def test_gemini_none_skips_without_marking(monkeypatch, cascade_env, job, get_decision):
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
     monkeypatch.setattr(main, "is_relevant_ai_ollama", lambda j: True)
     monkeypatch.setattr(main, "is_relevant_ai", lambda j: None)
@@ -83,3 +87,4 @@ def test_gemini_none_skips_without_marking(monkeypatch, cascade_env, job):
 
     assert cascade_env == []
     assert bot.already_sent(job["link"]) is False
+    assert get_decision(job["link"]) is None

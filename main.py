@@ -12,6 +12,7 @@ from sources import fetch_greenhouse_jobs
 import time
 
 KEYWORDS = ["graduate", "junior", "intern", "engineer", "software"]
+START_TIME = time.time()
 
 
 def is_relevant(job):
@@ -21,6 +22,7 @@ def is_relevant(job):
 
 def check_jobs():
     check_relevance = is_relevant_ai_ollama if LLM_BACKEND == "ollama" else is_relevant_ai
+    check_relevance_decision = "gemma_rejected" if LLM_BACKEND == "ollama" else "gemini_rejected"
 
     jobs = []
     for slug in get_companies():
@@ -32,6 +34,7 @@ def check_jobs():
             continue
 
         if not is_relevant(job):
+            mark_as_sent(job["link"], "cheap_filter")
             print("Skip (cheap filter):", job["title"])
             continue
 
@@ -44,7 +47,7 @@ def check_jobs():
                 continue
 
             if not gemma_decision:
-                mark_as_sent(job["link"])
+                mark_as_sent(job["link"], "gemma_rejected")
                 print("Skip (AI rejected by gemma):", job["title"])
                 continue
 
@@ -53,11 +56,12 @@ def check_jobs():
                 print("Skip (AI error, will retry):", job["title"])
                 continue
 
-            mark_as_sent(job["link"])
             if gemini_decision:
                 send_notification(job)
+                mark_as_sent(job["link"], "sent")
                 print("Sent (cascade approved):", job["title"])
             else:
+                mark_as_sent(job["link"], "gemini_rejected")
                 print("Skip (AI rejected by gemini after gemma pass):", job["title"])
             continue
 
@@ -70,19 +74,19 @@ def check_jobs():
 
         if ai_decision:
             send_notification(job)
-            mark_as_sent(job["link"])
+            mark_as_sent(job["link"], "sent")
             print("Sent (AI approved):", job["title"])
         else:
             # Marked sent even though rejected, so a rejected job isn't
             # re-sent to the LLM (and re-rejected) every cycle.
-            mark_as_sent(job["link"])
+            mark_as_sent(job["link"], check_relevance_decision)
             print("Skip (AI rejected):", job["title"])
 
 
 if __name__ == "__main__":
     while True:
         print("Checking messages...")
-        check_incoming_messages()
+        check_incoming_messages(START_TIME)
         print("Checking jobs...")
         check_jobs()
         print("Sleeping for 15 minutes...")

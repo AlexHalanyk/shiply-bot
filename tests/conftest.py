@@ -24,7 +24,13 @@ def no_sleep(monkeypatch):
 def isolated_db(tmp_path, monkeypatch):
     conn = sqlite3.connect(tmp_path / "test.db")
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE sent_jobs (link TEXT PRIMARY KEY)")
+    cursor.execute("""
+        CREATE TABLE sent_jobs (
+            link TEXT PRIMARY KEY,
+            decision TEXT,
+            processed_at TEXT
+        )
+    """)
     cursor.execute("CREATE TABLE subscribers (chat_id INTEGER PRIMARY KEY)")
     cursor.execute("CREATE TABLE companies (slug TEXT PRIMARY KEY)")
     conn.commit()
@@ -34,6 +40,16 @@ def isolated_db(tmp_path, monkeypatch):
 
     yield conn
     conn.close()
+
+
+@pytest.fixture
+def get_decision():
+    def _get_decision(link):
+        bot.db_cursor.execute("SELECT decision FROM sent_jobs WHERE link = ?", (link,))
+        row = bot.db_cursor.fetchone()
+        return row[0] if row else None
+
+    return _get_decision
 
 
 @pytest.fixture
