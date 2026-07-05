@@ -1,5 +1,7 @@
 # JobRadar
 
+[![Tests](https://github.com/AlexHalanyk/JobRadar/actions/workflows/tests.yml/badge.svg)](https://github.com/AlexHalanyk/JobRadar/actions/workflows/tests.yml)
+
 A Telegram bot that monitors company ATS APIs directly and notifies subscribers
 about new graduate software engineering vacancies — often hours or days before
 they appear on job aggregators.

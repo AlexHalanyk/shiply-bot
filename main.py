@@ -45,7 +45,7 @@ def check_jobs():
 
             if not gemma_decision:
                 mark_as_sent(job["link"])
-                print("Skip (AI rejected (gemma)):", job["title"])
+                print("Skip (AI rejected by gemma):", job["title"])
                 continue
 
             gemini_decision = is_relevant_ai(job)
@@ -58,7 +58,7 @@ def check_jobs():
                 send_notification(job)
                 print("Sent (cascade approved):", job["title"])
             else:
-                print("Skip (AI rejected (gemini after gemma pass)):", job["title"])
+                print("Skip (AI rejected by gemini after gemma pass):", job["title"])
             continue
 
         ai_decision = check_relevance(job)

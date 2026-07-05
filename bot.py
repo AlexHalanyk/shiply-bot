@@ -14,7 +14,8 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
 OLLAMA_URL = os.getenv("OLLAMA_URL")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:12b")
 
-db = sqlite3.connect("data/sent_jobs.db")
+DB_PATH = os.getenv("JOBRADAR_DB_PATH", "data/sent_jobs.db")
+db = sqlite3.connect(DB_PATH)
 db_cursor = db.cursor()
 
 db_cursor.execute("""
