@@ -19,6 +19,9 @@ or weekly digest emails.
   Gemini 2.5 Flash relevance check for survivors.
 - Self-service via chat: `/start` to subscribe, or send a Greenhouse slug or
   URL (e.g. `monzo`) to add a company to the watchlist — no redeploy needed.
+- Per-subscriber filter profiles: `/profile <text>` lets each subscriber
+  describe what they're looking for in free text; every job is evaluated
+  once per distinct profile, and only matching subscribers get notified.
 - Dedup via SQLite: every processed job is remembered, so nothing is
   evaluated or sent twice, even across restarts.
 - Resilient to LLM API errors and rate limits: failures are retried next
@@ -45,6 +48,25 @@ UK CS graduate. LLM output is never trusted blindly — it's normalised
 **Dedup via SQLite**: processed job links are stored in the `sent_jobs`
 table so a job is only ever evaluated and sent once. The database lives in a
 Docker volume so history survives restarts and redeploys.
+
+## Evaluation
+
+Relevance filtering is benchmarked offline against a golden set of ~70
+hand-labelled job titles (`golden_set.csv`), across three configurations:
+
+| Configuration | Accuracy | Precision | Recall | Coverage |
+|---|---|---|---|---|
+| Ollama (Gemma 4 12B, self-hosted) | 100% | 100% | 100% | 70/70 |
+| Gemini | 100%* | 100%* | 100%* | 51/70 (19 undecided) |
+| Cascade (Ollama → Gemini) | 98.6% | 100% | 90% | 70/70 |
+
+\* Measured only over the titles Gemini returned a decision for — 19/70 came
+back undecided due to Gemini API 503s at measurement time.
+
+Cascade inherits the availability of both models: its one miss was caused by
+the second-stage (Gemini) call being unavailable when the first stage
+(Gemma) had already flagged the job as a candidate. Run `eval_filter.py` to
+reproduce or rerun the benchmark.
 
 ## Tech stack
 

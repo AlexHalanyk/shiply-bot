@@ -34,7 +34,7 @@ def job():
 def single_backend_env(monkeypatch, isolated_db):
     monkeypatch.setattr(main, "get_companies", lambda: ["acme"])
     sent = []
-    monkeypatch.setattr(main, "send_notification", lambda job: sent.append(job["title"]))
+    monkeypatch.setattr(main, "send_notification", lambda job, chat_ids: sent.append(job["title"]))
     return sent
 
 
@@ -52,7 +52,7 @@ def test_cheap_filter_rejection_is_recorded(monkeypatch, single_backend_env, get
 def test_gemini_backend_sent_is_recorded(monkeypatch, single_backend_env, job, get_decision):
     monkeypatch.setattr(main, "LLM_BACKEND", "gemini")
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
-    monkeypatch.setattr(main, "is_relevant_ai", lambda j: True)
+    monkeypatch.setattr(main, "is_relevant_ai", lambda j, profile: True)
 
     main.check_jobs()
 
@@ -63,7 +63,7 @@ def test_gemini_backend_sent_is_recorded(monkeypatch, single_backend_env, job, g
 def test_gemini_backend_rejection_is_recorded(monkeypatch, single_backend_env, job, get_decision):
     monkeypatch.setattr(main, "LLM_BACKEND", "gemini")
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
-    monkeypatch.setattr(main, "is_relevant_ai", lambda j: False)
+    monkeypatch.setattr(main, "is_relevant_ai", lambda j, profile: False)
 
     main.check_jobs()
 
@@ -74,7 +74,7 @@ def test_gemini_backend_rejection_is_recorded(monkeypatch, single_backend_env, j
 def test_ollama_backend_rejection_is_recorded(monkeypatch, single_backend_env, job, get_decision):
     monkeypatch.setattr(main, "LLM_BACKEND", "ollama")
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
-    monkeypatch.setattr(main, "is_relevant_ai_ollama", lambda j: False)
+    monkeypatch.setattr(main, "is_relevant_ai_ollama", lambda j, profile: False)
 
     main.check_jobs()
 
@@ -85,7 +85,7 @@ def test_ollama_backend_rejection_is_recorded(monkeypatch, single_backend_env, j
 def test_ai_error_does_not_record_a_decision(monkeypatch, single_backend_env, job, get_decision):
     monkeypatch.setattr(main, "LLM_BACKEND", "gemini")
     monkeypatch.setattr(main, "fetch_greenhouse_jobs", lambda slug: [job])
-    monkeypatch.setattr(main, "is_relevant_ai", lambda j: None)
+    monkeypatch.setattr(main, "is_relevant_ai", lambda j, profile: None)
 
     main.check_jobs()
 

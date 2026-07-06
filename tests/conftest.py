@@ -26,12 +26,20 @@ def isolated_db(tmp_path, monkeypatch):
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE sent_jobs (
-            link TEXT PRIMARY KEY,
+            link TEXT NOT NULL,
+            profile TEXT NOT NULL,
             decision TEXT,
-            processed_at TEXT
+            processed_at TEXT,
+            PRIMARY KEY (link, profile)
         )
     """)
-    cursor.execute("CREATE TABLE subscribers (chat_id INTEGER PRIMARY KEY)")
+    cursor.execute("""
+        CREATE TABLE subscribers (
+            chat_id INTEGER PRIMARY KEY,
+            profile TEXT,
+            first_name TEXT
+        )
+    """)
     cursor.execute("CREATE TABLE companies (slug TEXT PRIMARY KEY)")
     conn.commit()
 
@@ -44,8 +52,10 @@ def isolated_db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def get_decision():
-    def _get_decision(link):
-        bot.db_cursor.execute("SELECT decision FROM sent_jobs WHERE link = ?", (link,))
+    def _get_decision(link, profile=bot.DEFAULT_PROFILE):
+        bot.db_cursor.execute(
+            "SELECT decision FROM sent_jobs WHERE link = ? AND profile = ?", (link, profile)
+        )
         row = bot.db_cursor.fetchone()
         return row[0] if row else None
 

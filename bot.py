@@ -15,6 +15,8 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini")
 OLLAMA_URL = os.getenv("OLLAMA_URL")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:12b")
 
+DEFAULT_PROFILE = "graduate or junior software engineering roles in the UK"
+
 DB_PATH = os.getenv("JOBRADAR_DB_PATH", "data/sent_jobs.db")
 db = sqlite3.connect(DB_PATH)
 db_cursor = db.cursor()
@@ -33,8 +35,35 @@ def _migrate_sent_jobs_schema(cursor, conn):
     existing_columns = {row[1] for row in cursor.fetchall()}
     if "decision" not in existing_columns:
         cursor.execute("ALTER TABLE sent_jobs ADD COLUMN decision TEXT")
+        existing_columns.add("decision")
     if "processed_at" not in existing_columns:
         cursor.execute("ALTER TABLE sent_jobs ADD COLUMN processed_at TEXT")
+        existing_columns.add("processed_at")
+
+    if "profile" not in existing_columns:
+        # A job is now evaluated once per distinct subscriber profile, so
+        # link alone can no longer be the primary key. SQLite can't alter a
+        # PRIMARY KEY in place, so rebuild the table under (link, profile)
+        # and backfill existing rows under the old single global profile.
+        cursor.execute("ALTER TABLE sent_jobs RENAME TO sent_jobs_old")
+        cursor.execute("""
+            CREATE TABLE sent_jobs (
+                link TEXT NOT NULL,
+                profile TEXT NOT NULL,
+                decision TEXT,
+                processed_at TEXT,
+                PRIMARY KEY (link, profile)
+            )
+        """)
+        cursor.execute(
+            """
+            INSERT INTO sent_jobs (link, profile, decision, processed_at)
+            SELECT link, ?, decision, processed_at FROM sent_jobs_old
+            """,
+            (DEFAULT_PROFILE,),
+        )
+        cursor.execute("DROP TABLE sent_jobs_old")
+
     conn.commit()
 
 
@@ -45,6 +74,24 @@ db_cursor.execute("""
         chat_id INTEGER PRIMARY KEY
     )
 """)
+
+
+def _migrate_subscribers_schema(cursor, conn):
+    # Additive-only migration: existing subscribers keep their chat_id and
+    # get backfilled onto the default profile rather than losing data.
+    cursor.execute("PRAGMA table_info(subscribers)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    if "profile" not in existing_columns:
+        cursor.execute("ALTER TABLE subscribers ADD COLUMN profile TEXT")
+    if "first_name" not in existing_columns:
+        cursor.execute("ALTER TABLE subscribers ADD COLUMN first_name TEXT")
+    conn.commit()
+
+    cursor.execute("UPDATE subscribers SET profile = ? WHERE profile IS NULL", (DEFAULT_PROFILE,))
+    conn.commit()
+
+
+_migrate_subscribers_schema(db_cursor, db)
 
 db_cursor.execute("""
     CREATE TABLE IF NOT EXISTS companies (
@@ -77,25 +124,33 @@ def send_message(chat_id, text):
     requests.post(url, data={"chat_id": chat_id, "text": text})
 
 
-def send_notification(job):
+def send_notification(job, chat_ids):
     text = f"💼  New Job\n{job['title']} at {job['company']}\n{job['location']}\n{job['link']}"
-    for subscriber_id in get_subscribers():
+    for subscriber_id in chat_ids:
         send_message(subscriber_id, text)
 
-def _build_relevance_prompt(job):
-    return f"""You are helping a UK computer science graduate find a suitable first software engineering job.
+def _build_relevance_prompt(job, profile=DEFAULT_PROFILE):
+    return f"""You are helping a UK job seeker find relevant vacancies.
 
 Job details:
 Title: {job['title']}
 Company: {job['company']}
 Location: {job['location']}
 
-Is this a graduate or junior software engineering role in the UK suitable for a CS graduate?
+The job seeker is looking for: {profile}
+
+Does this job match what the job seeker is looking for?
+
+Apprenticeships, placements and early-careers programmes count as YES.
+
+Data, analytics, platform, and ML-ops roles count as NO, unless the title
+itself contains one of: graduate, junior, intern, apprentice, early careers.
+
 Answer with only one word: YES or NO."""
 
 
-def is_relevant_ai(job):
-    prompt = _build_relevance_prompt(job)
+def is_relevant_ai(job, profile=DEFAULT_PROFILE):
+    prompt = _build_relevance_prompt(job, profile)
 
     try:
         response = client.models.generate_content(
@@ -118,8 +173,8 @@ def is_relevant_ai(job):
     return "YES" in decision
 
 
-def is_relevant_ai_ollama(job):
-    prompt = _build_relevance_prompt(job)
+def is_relevant_ai_ollama(job, profile=DEFAULT_PROFILE):
+    prompt = _build_relevance_prompt(job, profile)
 
     try:
         response = requests.post(
@@ -145,20 +200,28 @@ def is_relevant_ai_ollama(job):
 
     return "YES" in decision
 
-def already_sent(link):
-    db_cursor.execute("SELECT link FROM sent_jobs WHERE link = ?", (link,))
+def already_sent(link, profile=DEFAULT_PROFILE):
+    db_cursor.execute("SELECT link FROM sent_jobs WHERE link = ? AND profile = ?", (link, profile))
     return db_cursor.fetchone() is not None
 
 
-def mark_as_sent(link, decision):
+def mark_as_sent(link, decision, profile=DEFAULT_PROFILE):
     db_cursor.execute(
-        "INSERT OR IGNORE INTO sent_jobs (link, decision, processed_at) VALUES (?, ?, ?)",
-        (link, decision, datetime.datetime.now(datetime.timezone.utc).isoformat()),
+        "INSERT OR IGNORE INTO sent_jobs (link, profile, decision, processed_at) VALUES (?, ?, ?, ?)",
+        (link, profile, decision, datetime.datetime.now(datetime.timezone.utc).isoformat()),
     )
     db.commit()
 
-def add_subscriber(chat_id):
-    db_cursor.execute("INSERT OR IGNORE INTO subscribers (chat_id) VALUES (?)", (chat_id,))
+def add_subscriber(chat_id, first_name=None):
+    # Only first_name is overwritten on conflict: /start must never reset a
+    # profile the subscriber already customised via /profile.
+    db_cursor.execute(
+        """
+        INSERT INTO subscribers (chat_id, profile, first_name) VALUES (?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET first_name = excluded.first_name
+        """,
+        (chat_id, DEFAULT_PROFILE, first_name),
+    )
     db.commit()
 
 
@@ -166,6 +229,33 @@ def get_subscribers():
     db_cursor.execute("SELECT chat_id FROM subscribers")
     rows = db_cursor.fetchall()
     return [row[0] for row in rows]
+
+
+def get_profile(chat_id):
+    db_cursor.execute("SELECT profile FROM subscribers WHERE chat_id = ?", (chat_id,))
+    row = db_cursor.fetchone()
+    return row[0] if row and row[0] else DEFAULT_PROFILE
+
+
+def set_profile(chat_id, profile_text):
+    db_cursor.execute(
+        """
+        INSERT INTO subscribers (chat_id, profile) VALUES (?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET profile = excluded.profile
+        """,
+        (chat_id, profile_text),
+    )
+    db.commit()
+
+
+def get_distinct_profiles():
+    db_cursor.execute("SELECT DISTINCT profile FROM subscribers WHERE profile IS NOT NULL")
+    return [row[0] for row in db_cursor.fetchall()]
+
+
+def get_subscribers_for_profile(profile):
+    db_cursor.execute("SELECT chat_id FROM subscribers WHERE profile = ?", (profile,))
+    return [row[0] for row in db_cursor.fetchall()]
 
 
 def add_company(slug):
@@ -233,11 +323,18 @@ def check_incoming_messages(start_time):
 
         if chat_id is not None:
             if text == "/start":
-                add_subscriber(chat_id)
+                add_subscriber(chat_id, chat.get("first_name"))
                 print("New subscriber:", chat_id)
             elif text == "/stats":
                 # Reply directly to the requester only — never a broadcast.
                 send_message(chat_id, build_stats_reply(start_time))
+            elif text == "/profile" or text.startswith("/profile "):
+                profile_text = text[len("/profile"):].strip()
+                if profile_text:
+                    set_profile(chat_id, profile_text)
+                    send_message(chat_id, f"✅ Profile saved:\n{profile_text}")
+                else:
+                    send_message(chat_id, f"Current profile:\n{get_profile(chat_id)}")
             else:
                 slug = extract_greenhouse_slug(text)
                 if slug is not None:
