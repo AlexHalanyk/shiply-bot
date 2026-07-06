@@ -8,7 +8,7 @@ import requests
 
 def fetch_greenhouse_jobs(slug):
     url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     data = response.json()
 
     jobs = []
@@ -26,7 +26,7 @@ def fetch_greenhouse_jobs(slug):
 
 def fetch_lever_jobs(slug):
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     data = response.json()
 
     jobs = []

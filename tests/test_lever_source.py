@@ -21,8 +21,9 @@ def test_fetch_lever_jobs_maps_fields(monkeypatch):
 
     captured_url = {}
 
-    def fake_get(url):
+    def fake_get(url, timeout=None):
         captured_url["url"] = url
+        captured_url["timeout"] = timeout
         return SimpleNamespace(json=lambda: payload)
 
     monkeypatch.setattr("sources.requests.get", fake_get)
@@ -30,6 +31,7 @@ def test_fetch_lever_jobs_maps_fields(monkeypatch):
     jobs = fetch_lever_jobs("acme")
 
     assert captured_url["url"] == "https://api.lever.co/v0/postings/acme?mode=json"
+    assert captured_url["timeout"] == 10
     assert jobs == [
         {
             "title": "Graduate Software Engineer",
@@ -49,6 +51,6 @@ def test_fetch_lever_jobs_maps_fields(monkeypatch):
 
 
 def test_fetch_lever_jobs_empty_board(monkeypatch):
-    monkeypatch.setattr("sources.requests.get", lambda url: SimpleNamespace(json=lambda: []))
+    monkeypatch.setattr("sources.requests.get", lambda url, timeout=None: SimpleNamespace(json=lambda: []))
 
     assert fetch_lever_jobs("empty-co") == []

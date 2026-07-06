@@ -144,6 +144,20 @@ def extract_greenhouse_slug(text):
     return None
 
 
+LEVER_URL_RE = re.compile(r"jobs\.lever\.co/([a-zA-Z0-9-]+)")
+
+
+def extract_lever_slug(text):
+    # Only matches explicit jobs.lever.co URLs (not bare slugs, which stay
+    # ambiguous and go through the Greenhouse-then-Lever probe fallback
+    # below). Trailing path segments (e.g. a specific posting id) are
+    # ignored -- only the org slug right after the host is captured.
+    match = LEVER_URL_RE.search(text)
+    if match:
+        return match.group(1)
+    return None
+
+
 # "workday:{tenant}:{site}" has no way to express the host, since wd1 is by
 # far the most common; a full careers URL (which encodes the real host) is
 # the fallback for tenants on wd3/wd5.
@@ -416,6 +430,81 @@ def build_stats_reply(start_time):
     return "\n".join(lines)
 
 
+def _handle_update(update, start_time):
+    message = update.get("message", {})
+    chat = message.get("chat", {})
+    chat_id = chat.get("id")
+    text = message.get("text", "").strip()
+
+    if chat_id is None:
+        return
+
+    if text == "/start":
+        add_subscriber(chat_id, chat.get("first_name"))
+        print("New subscriber:", chat_id)
+    elif text == "/stats":
+        # Reply directly to the requester only — never a broadcast.
+        send_message(chat_id, build_stats_reply(start_time))
+    elif text == "/profile" or text.startswith("/profile "):
+        profile_text = text[len("/profile"):].strip()
+        if profile_text:
+            set_profile(chat_id, profile_text)
+            send_message(chat_id, f"✅ Profile saved:\n{profile_text}")
+        else:
+            send_message(chat_id, f"Current profile:\n{get_profile(chat_id)}")
+    else:
+        # Workday inputs ("workday:tenant:site" or a myworkdayjobs.com
+        # URL) have a distinct shape that never overlaps with a bare
+        # Greenhouse/Lever slug, so check for one first.
+        workday_company = extract_workday_company(text)
+        if workday_company is not None:
+            tenant = workday_company["tenant"]
+            site = workday_company["site"]
+            host = workday_company["host"]
+            if is_valid_workday_board(tenant, site, host):
+                company_slug = f"{tenant}:{site}"
+                add_company(company_slug, "workday", tenant=tenant, site=site, host=host)
+                send_message(chat_id, f"✅ {company_slug} added, now tracking (Workday)")
+                print("New company tracked:", company_slug, "(workday)")
+            else:
+                send_message(chat_id, f"❌ Workday board not found: {tenant}/{site}")
+            return
+
+        # An explicit jobs.lever.co URL already tells us the ATS, so treat
+        # it as unambiguous too, same as an explicit Greenhouse URL below.
+        lever_slug = extract_lever_slug(text)
+        if lever_slug is not None:
+            if is_valid_lever_board(lever_slug):
+                add_company(lever_slug, "lever")
+                send_message(chat_id, f"✅ {lever_slug} added, now tracking (Lever)")
+                print("New company tracked:", lever_slug, "(lever)")
+            else:
+                send_message(chat_id, f"❌ Board not found: {lever_slug}")
+            return
+
+        slug = extract_greenhouse_slug(text)
+        if slug is not None:
+            # An explicit Greenhouse URL already tells us the ATS,
+            # so there's no ambiguity to resolve — don't probe
+            # Lever too.
+            is_greenhouse_url = GREENHOUSE_SLUG_RE.search(text) is not None
+
+            if is_valid_greenhouse_board(slug):
+                add_company(slug, "greenhouse")
+                send_message(chat_id, f"✅ {slug} added, now tracking (Greenhouse)")
+                print("New company tracked:", slug, "(greenhouse)")
+            elif not is_greenhouse_url and is_valid_lever_board(slug):
+                add_company(slug, "lever")
+                send_message(chat_id, f"✅ {slug} added, now tracking (Lever)")
+                print("New company tracked:", slug, "(lever)")
+            else:
+                send_message(chat_id, f"❌ Board not found: {slug}")
+        else:
+            # Nothing recognised this input at all — still reply, so the
+            # sender never sees silence and mistakes the bot for dead.
+            send_message(chat_id, f"❌ Board not found: {text}")
+
+
 def check_incoming_messages(start_time):
     url = f"https://api.telegram.org/bot{token}/getUpdates"
     response = requests.get(url)
@@ -423,59 +512,12 @@ def check_incoming_messages(start_time):
 
     last_update_id = 0
     for update in data["result"]:
-        message = update.get("message", {})
-        chat = message.get("chat", {})
-        chat_id = chat.get("id")
-        text = message.get("text", "").strip()
-
-        if chat_id is not None:
-            if text == "/start":
-                add_subscriber(chat_id, chat.get("first_name"))
-                print("New subscriber:", chat_id)
-            elif text == "/stats":
-                # Reply directly to the requester only — never a broadcast.
-                send_message(chat_id, build_stats_reply(start_time))
-            elif text == "/profile" or text.startswith("/profile "):
-                profile_text = text[len("/profile"):].strip()
-                if profile_text:
-                    set_profile(chat_id, profile_text)
-                    send_message(chat_id, f"✅ Profile saved:\n{profile_text}")
-                else:
-                    send_message(chat_id, f"Current profile:\n{get_profile(chat_id)}")
-            else:
-                # Workday inputs ("workday:tenant:site" or a myworkdayjobs.com
-                # URL) have a distinct shape that never overlaps with a bare
-                # Greenhouse/Lever slug, so check for one first.
-                workday_company = extract_workday_company(text)
-                if workday_company is not None:
-                    tenant = workday_company["tenant"]
-                    site = workday_company["site"]
-                    host = workday_company["host"]
-                    if is_valid_workday_board(tenant, site, host):
-                        company_slug = f"{tenant}:{site}"
-                        add_company(company_slug, "workday", tenant=tenant, site=site, host=host)
-                        send_message(chat_id, f"✅ {company_slug} added, now tracking (Workday)")
-                        print("New company tracked:", company_slug, "(workday)")
-                    else:
-                        send_message(chat_id, f"❌ Workday board not found: {tenant}/{site}")
-                else:
-                    slug = extract_greenhouse_slug(text)
-                    if slug is not None:
-                        # An explicit Greenhouse URL already tells us the ATS,
-                        # so there's no ambiguity to resolve — don't probe
-                        # Lever too.
-                        is_greenhouse_url = GREENHOUSE_SLUG_RE.search(text) is not None
-
-                        if is_valid_greenhouse_board(slug):
-                            add_company(slug, "greenhouse")
-                            send_message(chat_id, f"✅ {slug} added, now tracking (Greenhouse)")
-                            print("New company tracked:", slug, "(greenhouse)")
-                        elif not is_greenhouse_url and is_valid_lever_board(slug):
-                            add_company(slug, "lever")
-                            send_message(chat_id, f"✅ {slug} added, now tracking (Lever)")
-                            print("New company tracked:", slug, "(lever)")
-                        else:
-                            send_message(chat_id, f"❌ Board not found: {slug}")
+        try:
+            _handle_update(update, start_time)
+        except Exception as e:
+            # One malformed/unexpected update must never kill the poll loop —
+            # log and move on so every other chat (and /stats) keeps working.
+            print(f"Error handling update {update.get('update_id')}:", e)
 
         last_update_id = update["update_id"]
 
